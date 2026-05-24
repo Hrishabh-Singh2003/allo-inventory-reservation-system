@@ -35,6 +35,7 @@ interface Product {
 }
 
 interface Warehouse {
+  code: string;
   name: string;
   location: string;
 }
@@ -132,6 +133,14 @@ export function CheckoutClient({ reservation }: CheckoutClientProps) {
 
     if (!email || !name || !cardNumber) {
       toast.error("Please fill out all billing credentials.");
+      return;
+    }
+
+    const cleanCard = cardNumber.replace(/\D/g, "");
+    if (cleanCard.length !== 16) {
+      toast.error("Payment Error", {
+        description: "Please enter a valid 16-digit credit card number.",
+      });
       return;
     }
 
@@ -256,7 +265,7 @@ export function CheckoutClient({ reservation }: CheckoutClientProps) {
                     <span className="text-foreground font-bold">{item.product.name}</span>
                     <span className="text-muted-foreground mt-0.5 block flex items-center gap-1 text-xs">
                       <MapPin className="h-3 w-3" />
-                      Shipped from: {item.warehouse.name}
+                      Shipped from: Hub {item.warehouse.code}
                     </span>
                   </div>
                   <span className="text-muted-foreground font-mono">Qty: {item.quantity}</span>
@@ -469,7 +478,7 @@ export function CheckoutClient({ reservation }: CheckoutClientProps) {
                     <span className="text-foreground font-bold">{item.product.name}</span>
                     <span className="text-muted-foreground mt-0.5 block flex items-center gap-1 text-xs">
                       <MapPin className="h-3 w-3" />
-                      Warehouse: {item.warehouse.name}
+                      Warehouse: Hub {item.warehouse.code}
                     </span>
                   </div>
                   <div className="text-right">

@@ -23,6 +23,7 @@ interface Product {
 }
 
 interface Warehouse {
+  code: string;
   name: string;
 }
 
@@ -200,7 +201,7 @@ export function ReservationsClient({ initialReservations }: ReservationsClientPr
                         </span>
                         {" from "}
                         <span className="text-muted-foreground font-medium">
-                          {item.warehouse.name.replace("Hub", "").trim()}
+                          Hub {item.warehouse.code}
                         </span>
                       </div>
                     ))}

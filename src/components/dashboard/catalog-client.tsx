@@ -212,10 +212,7 @@ export function CatalogClient({ initialProducts, warehouses }: CatalogClientProp
                       <div className="flex justify-between text-xs">
                         <span className="text-foreground flex items-center gap-1 font-medium">
                           <MapPin className="text-muted-foreground h-3 w-3" />
-                          {inv.warehouse.name
-                            .replace("Hub", "")
-                            .replace("Distribution Center", "")
-                            .trim()}
+                          Hub {inv.warehouse.code}
                         </span>
                         <span className="text-muted-foreground font-mono">
                           {total === 0 ? (
@@ -333,7 +330,7 @@ export function CatalogClient({ initialProducts, warehouses }: CatalogClientProp
                         value={inv.warehouseId}
                         disabled={inv.availableQuantity <= 0}
                       >
-                        {inv.warehouse.name} ({inv.availableQuantity} available)
+                        Hub {inv.warehouse.code} ({inv.availableQuantity} available)
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -25,7 +25,7 @@ export default async function CheckoutPage({ params }: CheckoutPageProps) {
             select: { name: true, sku: true, price: true },
           },
           warehouse: {
-            select: { name: true, location: true },
+            select: { name: true, location: true, code: true },
           },
         },
       },

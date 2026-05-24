@@ -14,7 +14,7 @@ export default async function ReservationsPage() {
             select: { name: true, sku: true },
           },
           warehouse: {
-            select: { name: true },
+            select: { name: true, code: true },
           },
         },
       },
