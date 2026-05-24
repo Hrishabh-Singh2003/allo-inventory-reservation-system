@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, X, Clock, AlertCircle, RefreshCw, Trash2, ShoppingCart } from "lucide-react";
+import { Check, X, Clock, AlertCircle, ShoppingCart } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -51,7 +51,6 @@ interface ReservationsClientProps {
 export function ReservationsClient({ initialReservations }: ReservationsClientProps) {
   const router = useRouter();
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
-  const [isClearing, setIsClearing] = useState(false);
 
   const handleConfirm = async (id: string) => {
     setIsUpdating(id);
@@ -127,43 +126,6 @@ export function ReservationsClient({ initialReservations }: ReservationsClientPr
     }
   };
 
-  // Scheduled Active Cleanup simulation trigger
-  const handleTriggerCleanup = async () => {
-    setIsClearing(true);
-    const toastId = toast.loading("Simulating scheduled Cron job trigger...");
-
-    try {
-      const response = await fetch("/api/reservations/cleanup", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer super-secret-cleanup-token-for-cron-scheduler",
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Cron trigger execution failed.");
-      }
-
-      toast.success("Expiry Cron Script Finished!", {
-        id: toastId,
-        description: `Successfully found and released ${data.clearedCount} expired allocation(s).`,
-        duration: 5000,
-      });
-
-      router.refresh();
-    } catch (err: any) {
-      console.error(err);
-      toast.error("Cron Trigger Failed", {
-        id: toastId,
-        description: err.message || "An unexpected error occurred during execution.",
-      });
-    } finally {
-      setIsClearing(false);
-    }
-  };
-
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "PENDING":
@@ -196,20 +158,6 @@ export function ReservationsClient({ initialReservations }: ReservationsClientPr
             mechanics.
           </p>
         </div>
-
-        <Button
-          onClick={handleTriggerCleanup}
-          disabled={isClearing}
-          variant="outline"
-          className="flex items-center gap-1.5 self-start border-amber-500/30 text-amber-500 hover:bg-amber-500/10 sm:self-center"
-        >
-          {isClearing ? (
-            <RefreshCw className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-          Simulate Expiry Cron Job
-        </Button>
       </div>
 
       {/* Main Reservation Log table */}
