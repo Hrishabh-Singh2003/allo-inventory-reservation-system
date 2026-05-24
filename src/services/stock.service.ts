@@ -1,10 +1,14 @@
 import { db } from "@/lib/db";
+import { ReservationService } from "./reservation.service";
 
 export class StockService {
   /**
    * Fetches the complete list of products along with their inventories and calculated availability.
    */
   static async getProductStockDetails() {
+    // Lazy cleanup: Release any expired pending reservations before fetching stock details
+    await ReservationService.lazyCleanupExpired();
+
     const products = await db.product.findMany({
       include: {
         inventories: {
@@ -30,6 +34,9 @@ export class StockService {
    * Fetches stock levels specifically for a single warehouse.
    */
   static async getWarehouseStocks(warehouseId: string) {
+    // Lazy cleanup: Release any expired pending reservations before fetching stock details
+    await ReservationService.lazyCleanupExpired();
+
     const inventories = await db.inventory.findMany({
       where: { warehouseId },
       include: {

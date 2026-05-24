@@ -40,11 +40,8 @@ export class ReservationService {
     });
 
     return await db.$transaction(async (tx) => {
-      // 2. Just-In-Time (JIT) passive expiry: Release any expired pending reservations
-      // for these specific product-warehouse intersections before calculating availability.
-      for (const item of sortedItems) {
-        await this.cleanupExpiredForStock(tx, item.productId, item.warehouseId);
-      }
+      // 2. Just-In-Time (JIT) passive expiry: Release all expired pending reservations globally
+      await this.lazyCleanupExpired(tx);
 
       // 3. Row Locking: Lock each unique Inventory row in sorted order.
       // This forces any concurrent checkouts for these exact items to queue at the database level.
@@ -127,6 +124,9 @@ export class ReservationService {
    */
   static async confirmReservation(reservationId: string) {
     return await db.$transaction(async (tx) => {
+      // Just-In-Time (JIT) passive expiry: Release all expired pending reservations globally
+      await this.lazyCleanupExpired(tx);
+
       // 1. Fetch and validate reservation status
       const reservation = await tx.reservation.findUnique({
         where: { id: reservationId },
@@ -262,139 +262,94 @@ export class ReservationService {
   }
 
   /**
-   * System-wide cleanup: Finds and releases all expired pending reservations.
-   * Processes sequentially inside separate mini-transactions to minimize row lock duration.
+   * Reusable lazy cleanup utility for expired pending reservations.
+   * Finds all expired pending reservations, releases their inventory,
+   * and updates their status to RELEASED.
    */
-  static async cleanupExpiredGlobal() {
+  static async lazyCleanupExpired(tx?: any) {
     const now = new Date();
 
-    const expiredReservations = await db.reservation.findMany({
-      where: {
-        status: ReservationStatus.PENDING,
-        expiresAt: { lt: now },
-      },
-      include: { items: true },
-    });
-
-    if (expiredReservations.length === 0) {
-      return { count: 0 };
-    }
-
-    let successCount = 0;
-
-    for (const res of expiredReservations) {
-      try {
-        await db.$transaction(async (tx) => {
-          // 1. Lock/fetch the current reservation row to prevent concurrent release race conditions
-          const currentRes = await tx.reservation.findUnique({
-            where: { id: res.id },
-          });
-
-          // Skip if the reservation was already confirmed, released, or expired by another thread
-          if (!currentRes || currentRes.status !== ReservationStatus.PENDING) {
-            return;
-          }
-
-          // Sort items for deadlock prevention
-          const sortedItems = [...res.items].sort((a, b) => {
-            const keyA = `${a.productId}_${a.warehouseId}`;
-            const keyB = `${b.productId}_${b.warehouseId}`;
-            return keyA.localeCompare(keyB);
-          });
-
-          // Lock and restore allocations
-          for (const item of sortedItems) {
-            const inventories = await tx.$queryRaw<any[]>`
-              SELECT * FROM "Inventory"
-              WHERE "productId" = ${item.productId} AND "warehouseId" = ${item.warehouseId}
-              FOR UPDATE
-            `;
-
-            if (inventories.length > 0) {
-              const stock = inventories[0];
-              const decrementAmount = Math.min(item.quantity, stock.reservedQuantity);
-
-              await tx.inventory.update({
-                where: { id: stock.id },
-                data: {
-                  reservedQuantity: { decrement: decrementAmount },
-                },
-              });
-            }
-          }
-
-          // Mark status as EXPIRED
-          await tx.reservation.update({
-            where: { id: res.id },
-            data: {
-              status: ReservationStatus.EXPIRED,
-            },
-          });
-
-          successCount++;
-        });
-      } catch (err) {
-        console.error(`Failed to expire reservation ${res.id} due to transactional conflict:`, err);
-      }
-    }
-
-    return { count: successCount };
-  }
-
-  /**
-   * Scoped JIT clean up helper running inside an active transaction block.
-   */
-  private static async cleanupExpiredForStock(tx: any, productId: string, warehouseId: string) {
-    const now = new Date();
-
-    // Query active items belonging to pending reservations that have passed their TTL
-    const expiredItems = await tx.reservationItem.findMany({
-      where: {
-        productId,
-        warehouseId,
-        reservation: {
+    const executeCleanup = async (transactionClient: any) => {
+      const expiredReservations = await transactionClient.reservation.findMany({
+        where: {
           status: ReservationStatus.PENDING,
           expiresAt: { lt: now },
         },
-      },
-      include: { reservation: true },
-    });
-
-    if (expiredItems.length === 0) return;
-
-    // Compile distinct parent reservations to update
-    const reservationIdsToExpire = Array.from(
-      new Set(expiredItems.map((item: any) => item.reservationId))
-    );
-
-    // 1. Mark parent reservations as EXPIRED
-    await tx.reservation.updateMany({
-      where: {
-        id: { in: reservationIdsToExpire },
-      },
-      data: {
-        status: ReservationStatus.EXPIRED,
-      },
-    });
-
-    // 2. Decrement allocations for this specific inventory row
-    const totalQtyToRelease = expiredItems.reduce(
-      (sum: number, item: any) => sum + item.quantity,
-      0
-    );
-
-    const inventoryRow = await tx.inventory.findUnique({
-      where: { productId_warehouseId: { productId, warehouseId } },
-    });
-
-    if (inventoryRow) {
-      const decrementAmount = Math.min(totalQtyToRelease, inventoryRow.reservedQuantity);
-      await tx.inventory.update({
-        where: { id: inventoryRow.id },
-        data: {
-          reservedQuantity: { decrement: decrementAmount },
-        },
+        include: { items: true },
       });
+
+      if (expiredReservations.length === 0) return { count: 0 };
+
+      let count = 0;
+      for (const res of expiredReservations) {
+        // Fetch and lock reservation to prevent concurrent double-releases
+        const currentRes = await transactionClient.reservation.findUnique({
+          where: { id: res.id },
+        });
+
+        if (!currentRes || currentRes.status !== ReservationStatus.PENDING) {
+          continue;
+        }
+
+        // Sort items for deadlock prevention
+        const sortedItems = [...res.items].sort((a, b) => {
+          const keyA = `${a.productId}_${a.warehouseId}`;
+          const keyB = `${b.productId}_${b.warehouseId}`;
+          return keyA.localeCompare(keyB);
+        });
+
+        // Lock inventory rows and decrement reservedQuantity
+        for (const item of sortedItems) {
+          const inventories = await transactionClient.$queryRaw<any[]>`
+            SELECT id, "reservedQuantity" FROM "Inventory"
+            WHERE "productId" = ${item.productId} AND "warehouseId" = ${item.warehouseId}
+            FOR UPDATE
+          `;
+
+          if (inventories.length > 0) {
+            const stock = inventories[0];
+            const decrementAmount = Math.min(item.quantity, stock.reservedQuantity);
+
+            await transactionClient.inventory.update({
+              where: { id: stock.id },
+              data: {
+                reservedQuantity: { decrement: decrementAmount },
+              },
+            });
+          }
+        }
+
+        // Mark reservation as RELEASED
+        await transactionClient.reservation.update({
+          where: { id: res.id },
+          data: {
+            status: ReservationStatus.RELEASED,
+          },
+        });
+        count++;
+      }
+      return { count };
+    };
+
+    if (tx) {
+      return await executeCleanup(tx);
+    } else {
+      return await db.$transaction(async (newTx) => {
+        return await executeCleanup(newTx);
+      });
+    }
+  }
+
+  /**
+   * System-wide cleanup: Finds and releases all expired pending reservations.
+   * Redirects to the reusable lazyCleanupExpired method.
+   */
+  static async cleanupExpiredGlobal() {
+    try {
+      return await this.lazyCleanupExpired();
+    } catch (err) {
+      console.error("Failed to run global cleanup:", err);
+      return { count: 0 };
     }
   }
 }
