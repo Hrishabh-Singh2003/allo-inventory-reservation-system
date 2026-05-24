@@ -319,7 +319,7 @@ export function CatalogClient({ initialProducts, warehouses }: CatalogClientProp
                 <Select
                   value={selectedWarehouseId}
                   onValueChange={(val) => {
-                    setSelectedWarehouseId(val);
+                    setSelectedWarehouseId(val || "");
                     setQuantity(1);
                   }}
                 >
