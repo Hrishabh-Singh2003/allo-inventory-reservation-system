@@ -41,7 +41,7 @@ export class ReservationService {
 
     return await db.$transaction(async (tx) => {
       // 2. Just-In-Time (JIT) passive expiry: Release all expired pending reservations globally
-      await this.lazyCleanupExpired(tx);
+      await this.cleanupExpiredReservations(tx);
 
       // 3. Row Locking: Lock each unique Inventory row in sorted order.
       // This forces any concurrent checkouts for these exact items to queue at the database level.
@@ -125,7 +125,7 @@ export class ReservationService {
   static async confirmReservation(reservationId: string) {
     return await db.$transaction(async (tx) => {
       // Just-In-Time (JIT) passive expiry: Release all expired pending reservations globally
-      await this.lazyCleanupExpired(tx);
+      await this.cleanupExpiredReservations(tx);
 
       // 1. Fetch and validate reservation status
       const reservation = await tx.reservation.findUnique({
@@ -266,7 +266,7 @@ export class ReservationService {
    * Finds all expired pending reservations, releases their inventory,
    * and updates their status to RELEASED.
    */
-  static async lazyCleanupExpired(tx?: any) {
+  static async cleanupExpiredReservations(tx?: any) {
     const now = new Date();
 
     const executeCleanup = async (transactionClient: any) => {
@@ -346,7 +346,7 @@ export class ReservationService {
    */
   static async cleanupExpiredGlobal() {
     try {
-      return await this.lazyCleanupExpired();
+      return await this.cleanupExpiredReservations();
     } catch (err) {
       console.error("Failed to run global cleanup:", err);
       return { count: 0 };

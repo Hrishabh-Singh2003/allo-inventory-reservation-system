@@ -7,7 +7,7 @@ export class StockService {
    */
   static async getProductStockDetails() {
     // Lazy cleanup: Release any expired pending reservations before fetching stock details
-    await ReservationService.lazyCleanupExpired();
+    await ReservationService.cleanupExpiredReservations();
 
     const products = await db.product.findMany({
       include: {
@@ -35,7 +35,7 @@ export class StockService {
    */
   static async getWarehouseStocks(warehouseId: string) {
     // Lazy cleanup: Release any expired pending reservations before fetching stock details
-    await ReservationService.lazyCleanupExpired();
+    await ReservationService.cleanupExpiredReservations();
 
     const inventories = await db.inventory.findMany({
       where: { warehouseId },
